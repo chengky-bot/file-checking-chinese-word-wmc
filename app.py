@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-科室教材/報告審核工具
+教材/學行報告審核工具
 
 請先安裝相依套件：
     pip install streamlit python-docx
