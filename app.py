@@ -15,18 +15,23 @@
   會先合併成連續詞再於字間插入 Unicode U+2060（WORD JOINER，零寬不換行字元）。
   WORD JOINER 讓 Word 盡量不在詞內斷行，整詞較易一起移到下一行，避免行尾「斷詞」；
   合併與插入後的整段詞（含 joiner）標為紅色。
+- 含圖段落：以私人使用區字元作為「圖片占位符」參與文字規則，寫回時還原內嵌圖 w:r，
+  並保留 w:pPr，以降低表格／段落樣式走位；表格本身不刪除，只處理儲存格內文字。
 """
 
 from __future__ import annotations
 
 import io
+import os
 import re
+from copy import deepcopy
 from collections import defaultdict
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import streamlit as st
 from docx import Document
 from docx.enum.text import WD_UNDERLINE
+from docx.oxml.ns import qn
 from docx.shared import RGBColor
 
 # ---------------------------------------------------------------------------
@@ -86,6 +91,10 @@ _JILU_VERB_HINTS = (
 
 # 預設不可分割詞（可在 UI 修改）
 DEFAULT_INDIVISIBLE = "廣場\n落淚\n靈魂"
+
+# 內嵌圖／物件占位：私人使用區字元（U+FDD0），不應出於一般文稿；規則字典不會替換此字。
+# 含圖段落先改為「文字 + 占位 + 文字…」參與修正，再依序插回複製的 w:r，以保留圖像。
+IMAGE_PLACEHOLDER = "\ufdd0"
 
 
 def _parse_custom_rules(text: str) -> Dict[str, str]:
@@ -597,22 +606,48 @@ def _paragraph_plain(paragraph) -> str:
     return "".join(run.text for run in paragraph.runs)
 
 
-def _clear_paragraph_runs(paragraph) -> None:
-    """移除段落內所有 run，以便重建格式。"""
-    p_element = paragraph._p
-    for child in list(p_element):
-        if child.tag.endswith("r"):
-            p_element.remove(child)
+def _run_has_drawing(run) -> bool:
+    """偵測 run 是否含內嵌圖／繪圖（w:drawing、舊版 pict 等）。"""
+    xml = run._element  # lxml
+    for el in xml.iter():
+        tag = el.tag
+        if tag.endswith("drawing") or tag.endswith("pict") or tag.endswith("binaryData"):
+            return True
+    return False
 
 
-def _apply_paragraph_format(
+def _paragraph_text_and_drawings(paragraph) -> Tuple[str, List[Any]]:
+    """
+    串接段落可見文字；遇含圖 run 則插入 IMAGE_PLACEHOLDER 並保存該 w:r 的深拷貝（供還原）。
+    順序與 paragraph.runs 一致。
+    """
+    drawings: List[Any] = []
+    parts: List[str] = []
+    for run in paragraph.runs:
+        if _run_has_drawing(run):
+            parts.append(IMAGE_PLACEHOLDER)
+            drawings.append(deepcopy(run._element))
+        else:
+            parts.append(run.text or "")
+    return "".join(parts), drawings
+
+
+def _clear_paragraph_content_keep_ppr(paragraph) -> None:
+    """刪除段落內容但保留 w:pPr（對齊、間距、大綱層級等），避免表格／樣式走位。"""
+    p = paragraph._p
+    for child in list(p):
+        if child.tag == qn("w:pPr"):
+            continue
+        p.remove(child)
+
+
+def _append_formatted_runs(
     paragraph,
     text: str,
     red_indices: Set[int],
     underline_indices: Set[int],
 ) -> None:
-    """依字元索引重建 run：紅色、底線可同時存在。"""
-    _clear_paragraph_runs(paragraph)
+    """在段落末尾追加具紅字／底線的 runs（不清空段落）。"""
     if not text:
         return
     n = len(text)
@@ -633,6 +668,60 @@ def _apply_paragraph_format(
         if is_ul:
             run.font.underline = WD_UNDERLINE.SINGLE
         i = j
+
+
+def _write_formatted_runs_full(
+    paragraph,
+    text: str,
+    red_indices: Set[int],
+    underline_indices: Set[int],
+) -> None:
+    """清空段落內容（保留 pPr）後寫入紅字／底線 runs。"""
+    _clear_paragraph_content_keep_ppr(paragraph)
+    _append_formatted_runs(paragraph, text, red_indices, underline_indices)
+
+
+def _rebuild_paragraph_with_image_placeholders(
+    paragraph,
+    new_full: str,
+    drawing_elements: List[Any],
+    red_indices: Set[int],
+    underline_indices: Set[int],
+) -> bool:
+    """
+    將含 IMAGE_PLACEHOLDER 的字串還原為：文字 runs + 依序插入的圖像 w:r。
+    各文字片段的紅／底線索引為 new_full 中的絕對位置換算為區段相對位置。
+    """
+    ph = IMAGE_PLACEHOLDER
+    n_ph = new_full.count(ph)
+    if n_ph != len(drawing_elements):
+        # 規則誤動到占位符：不覆寫本段，避免圖片遺失（統計於外層）
+        return False
+    parts = new_full.split(ph)
+    _clear_paragraph_content_keep_ppr(paragraph)
+    pos = 0
+    ph_len = len(ph)
+    for i, part in enumerate(parts):
+        seg_start = pos
+        seg_end = pos + len(part)
+        rs = {x - seg_start for x in red_indices if seg_start <= x < seg_end}
+        us = {x - seg_start for x in underline_indices if seg_start <= x < seg_end}
+        _append_formatted_runs(paragraph, part, rs, us)
+        pos = seg_end
+        if i < len(drawing_elements):
+            paragraph._p.append(drawing_elements[i])
+            pos += ph_len
+    return True
+
+
+def _apply_paragraph_format(
+    paragraph,
+    text: str,
+    red_indices: Set[int],
+    underline_indices: Set[int],
+) -> None:
+    """依字元索引重建 run（純文字段落，無內嵌圖）。"""
+    _write_formatted_runs_full(paragraph, text, red_indices, underline_indices)
 
 
 def iter_all_paragraphs(doc: Document):
@@ -668,19 +757,26 @@ def process_document(
     proper_names: List[str],
     indivisible: List[str],
 ) -> defaultdict:
-    """就地修改 doc，並回傳統計。"""
+    """就地修改 doc，並回傳統計。含內嵌圖之段落以占位符保留圖片 run，其餘保留 w:pPr。"""
     stats: defaultdict = defaultdict(int)
     for p in iter_all_paragraphs(doc):
-        raw = _paragraph_plain(p)
+        text_ph, drs = _paragraph_text_and_drawings(p)
         new_text, red, under = process_paragraph_plain_text(
-            raw,
+            text_ph,
             custom_rules,
             proper_names,
             indivisible,
             stats,
             is_paragraph_for_period=True,
         )
-        _apply_paragraph_format(p, new_text, red, under)
+        if not drs:
+            _apply_paragraph_format(p, new_text, red, under)
+        else:
+            ok = _rebuild_paragraph_with_image_placeholders(
+                p, new_text, drs, red, under
+            )
+            if not ok:
+                stats["含圖段落占位異常_未改寫"] += 1
     return stats
 
 
@@ -699,6 +795,8 @@ def main() -> None:
         st.session_state.last_stats = None
     if "last_file_id" not in st.session_state:
         st.session_state.last_file_id = None
+    if "download_filename" not in st.session_state:
+        st.session_state.download_filename = "document_fixed.docx"
 
     col_main, col_side = st.columns([2, 1])
 
@@ -739,6 +837,8 @@ def main() -> None:
             buf.seek(0)
             st.session_state.processed_bytes = buf.getvalue()
             st.session_state.last_stats = dict(stats)
+            base, _ = os.path.splitext(up.name)
+            st.session_state.download_filename = f"{base}_fixed.docx"
 
     if st.session_state.processed_bytes is not None:
         stats = st.session_state.last_stats or {}
@@ -766,7 +866,7 @@ def main() -> None:
         st.download_button(
             label="下載已修改並紅色標記＋底線＋排位優化的 DOCX",
             data=st.session_state.processed_bytes,
-            file_name="修改後_完整版.docx",
+            file_name=st.session_state.download_filename,
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
 
