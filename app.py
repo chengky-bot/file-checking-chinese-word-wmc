@@ -786,8 +786,8 @@ def _total_changes(stats: defaultdict) -> int:
 
 
 def main() -> None:
-    st.set_page_config(page_title="科室教材/報告審核工具", layout="wide")
-    st.title("科室教材/報告審核工具")
+    st.set_page_config(page_title="教材/單元報告審核工具", layout="wide")
+    st.title("教材/單元報告審核工具")
 
     if "processed_bytes" not in st.session_state:
         st.session_state.processed_bytes = None
