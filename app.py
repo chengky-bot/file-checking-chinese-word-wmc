@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-教材/單元報告審核工具（完整最終版 + 優化修正統計顯示格式）
+教材/單元報告審核工具（完整最終版 + 已修正文字預覽）
 支援：DOCX、PDF、直接貼上文字
-修正統計已大幅優化：每個規則都會清楚顯示「次數 + 具體段落位置」
+修正統計已優化顯示位置
+新增：在網頁上直接預覽「已修正後的完整文字」
 """
 
 import io
@@ -614,7 +615,7 @@ def _total_changes(stats: defaultdict) -> int:
     return int(sum(stats.values()))
 
 # ---------------------------------------------------------------------------
-# 主程式
+# 主程式（已新增「已修正文字預覽」）
 # ---------------------------------------------------------------------------
 def main() -> None:
     st.set_page_config(page_title="教材/單元報告審核工具", layout="wide")
@@ -629,6 +630,8 @@ def main() -> None:
         st.session_state.last_findings = []
     if "report_text" not in st.session_state:
         st.session_state.report_text = None
+    if "preview_text" not in st.session_state:          # ← 新增預覽文字
+        st.session_state.preview_text = None
     if "download_filename" not in st.session_state:
         st.session_state.download_filename = "document_fixed.docx"
 
@@ -728,6 +731,13 @@ def main() -> None:
             base = os.path.splitext(input_name)[0]
             st.session_state.download_filename = f"{base}_fixed.docx"
 
+            # 產生已修正文字預覽（新增）
+            preview_lines = []
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    preview_lines.append(para.text.strip())
+            st.session_state.preview_text = "\n\n".join(preview_lines)
+
             # 產生報告
             report_lines = [
                 f"修正報告 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
@@ -757,19 +767,16 @@ def main() -> None:
                 stats = st.session_state.last_stats or {}
                 findings = st.session_state.get("last_findings", [])
 
-                # 內建規則
                 builtin_lines = [f"- {k}: {v}" for k, v in sorted(stats.items()) if k.startswith("內建:")]
                 if builtin_lines:
                     st.markdown("**內建規則**")
                     st.markdown("\n".join(builtin_lines))
 
-                # 自訂規則
                 custom_lines = [f"- {k}: {v}" for k, v in sorted(stats.items()) if k.startswith("自訂:")]
                 if custom_lines:
                     st.markdown("**自訂規則**")
                     st.markdown("\n".join(custom_lines))
 
-                # 其他規則（已優化顯示格式）
                 st.markdown("**其他規則**")
                 rule_locations = defaultdict(list)
                 for f in findings:
@@ -779,18 +786,12 @@ def main() -> None:
 
                 for rule, locs in sorted(rule_locations.items()):
                     count = len(locs)
-                    unique_locs = list(dict.fromkeys(locs))  # 去重
+                    unique_locs = list(dict.fromkeys(locs))
                     st.markdown(f"**• {rule}**　`{count} 次`")
-                    # 優化位置顯示：一行顯示多個段落
                     loc_str = "、".join(unique_locs[:8])
                     st.caption(f"出現於：{loc_str}")
                     if len(unique_locs) > 8:
                         st.caption(f"... 還有 {len(unique_locs)-8} 段")
-
-                # 其他未分類統計
-                other_keys = [k for k in sorted(stats.keys()) if not k.startswith(("內建:", "自訂:")) and k not in rule_locations]
-                for k in other_keys:
-                    st.markdown(f"• {k}: {stats[k]}")
 
         with col2:
             with st.expander("📍 字級問題位置", expanded=True):
@@ -804,6 +805,18 @@ def main() -> None:
                         st.caption(f"修正後：{item.get('after', '')[:80]}...")
                 else:
                     st.info("本次沒有發現需要修正的問題")
+
+        # ── 新增：已修正文字預覽 ──
+        with st.expander("📖 已修正文字預覽（完整內容）", expanded=False):
+            if st.session_state.get("preview_text"):
+                st.text_area(
+                    label="已修正後的完整文字（可複製）",
+                    value=st.session_state.preview_text,
+                    height=500,
+                    disabled=True,
+                )
+            else:
+                st.info("尚未產生預覽文字")
 
         st.divider()
 
