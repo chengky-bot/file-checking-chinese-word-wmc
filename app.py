@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-教材/單元報告審核工具（完整 UI 優化版 + PDF 支援 + 修正統計詳細位置）
-請先安裝相依套件：
-    pip install streamlit python-docx pymupdf
-
-執行方式：
-    streamlit run app.py
+教材/單元報告審核工具（完整最終版）
+支援：DOCX、PDF、直接貼上文字
+修正統計會顯示每個規則出現在哪幾段
 """
 
 import io
@@ -54,7 +51,7 @@ DEFAULT_INDIVISIBLE = "廣場\n落淚\n靈魂"
 IMAGE_PLACEHOLDER = "\ufdd0"
 
 # ---------------------------------------------------------------------------
-# 輔助函數（與之前相同）
+# 輔助函數
 # ---------------------------------------------------------------------------
 def _parse_custom_rules(text: str) -> Dict[str, str]:
     out: Dict[str, str] = {}
@@ -617,7 +614,7 @@ def _total_changes(stats: defaultdict) -> int:
     return int(sum(stats.values()))
 
 # ---------------------------------------------------------------------------
-# 主程式（已支援 PDF + 修正統計詳細位置）
+# 主程式
 # ---------------------------------------------------------------------------
 def main() -> None:
     st.set_page_config(page_title="教材/單元報告審核工具", layout="wide")
@@ -772,11 +769,9 @@ def main() -> None:
                     st.markdown("**自訂規則**")
                     st.markdown("\n".join(custom_lines))
 
-                # 其他規則（現在加上詳細位置）
+                # 其他規則（重點：顯示詳細段落位置）
                 st.markdown("**其他**")
-                # 按規則分組，顯示位置
-                from collections import defaultdict as dd
-                rule_locations = dd(list)
+                rule_locations = defaultdict(list)
                 for f in findings:
                     rule = f.get("rule", "未知規則")
                     loc = f.get("location", "未知段落")
@@ -784,18 +779,12 @@ def main() -> None:
 
                 for rule, locs in sorted(rule_locations.items()):
                     count = len(locs)
-                    st.markdown(f"• **{rule}**：{count} 次")
-                    # 顯示位置（避免太長，只顯示前 5 個）
                     unique_locs = list(dict.fromkeys(locs))  # 去重
-                    for loc in unique_locs[:5]:
+                    st.markdown(f"• **{rule}**：{count} 次")
+                    for loc in unique_locs[:8]:   # 顯示最多 8 個段落
                         st.caption(f"　　{loc}")
-                    if len(unique_locs) > 5:
-                        st.caption(f"　　... 還有 {len(unique_locs)-5} 段")
-
-                # 原本的其他統計（保持相容）
-                other_keys = [k for k in sorted(stats.keys()) if not k.startswith(("內建:", "自訂:")) and k not in rule_locations]
-                for k in other_keys:
-                    st.markdown(f"• {k}: {stats[k]}")
+                    if len(unique_locs) > 8:
+                        st.caption(f"　　... 還有 {len(unique_locs)-8} 段")
 
         with col2:
             with st.expander("📍 字級問題位置", expanded=True):
