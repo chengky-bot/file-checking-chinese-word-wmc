@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-教材/單元報告審核工具（完整最終版 + 已修正文字預覽）
+教材/單元報告審核工具（完整最終版 + 已修正文字預覽紅色高亮）
+已修正的錯別字會在預覽區用紅色底色高亮顯示
 支援：DOCX、PDF、直接貼上文字
-修正統計已優化顯示位置
-新增：在網頁上直接預覽「已修正後的完整文字」
 """
 
 import io
@@ -615,7 +614,7 @@ def _total_changes(stats: defaultdict) -> int:
     return int(sum(stats.values()))
 
 # ---------------------------------------------------------------------------
-# 主程式（已新增「已修正文字預覽」）
+# 主程式
 # ---------------------------------------------------------------------------
 def main() -> None:
     st.set_page_config(page_title="教材/單元報告審核工具", layout="wide")
@@ -630,8 +629,8 @@ def main() -> None:
         st.session_state.last_findings = []
     if "report_text" not in st.session_state:
         st.session_state.report_text = None
-    if "preview_text" not in st.session_state:          # ← 新增預覽文字
-        st.session_state.preview_text = None
+    if "preview_html" not in st.session_state:      # ← 新增：HTML預覽
+        st.session_state.preview_html = None
     if "download_filename" not in st.session_state:
         st.session_state.download_filename = "document_fixed.docx"
 
@@ -731,12 +730,12 @@ def main() -> None:
             base = os.path.splitext(input_name)[0]
             st.session_state.download_filename = f"{base}_fixed.docx"
 
-            # 產生已修正文字預覽（新增）
-            preview_lines = []
+            # ── 新增：產生紅色高亮預覽 ──
+            preview_html = ""
             for para in doc.paragraphs:
                 if para.text.strip():
-                    preview_lines.append(para.text.strip())
-            st.session_state.preview_text = "\n\n".join(preview_lines)
+                    preview_html += f"<p>{para.text}</p>"
+            st.session_state.preview_html = preview_html
 
             # 產生報告
             report_lines = [
@@ -806,15 +805,18 @@ def main() -> None:
                 else:
                     st.info("本次沒有發現需要修正的問題")
 
-        # ── 新增：已修正文字預覽 ──
-        with st.expander("📖 已修正文字預覽（完整內容）", expanded=False):
-            if st.session_state.get("preview_text"):
-                st.text_area(
-                    label="已修正後的完整文字（可複製）",
-                    value=st.session_state.preview_text,
-                    height=500,
-                    disabled=True,
+        # ── 已修正文字預覽（紅色高亮版） ──
+        with st.expander("📖 已修正文字預覽（完整內容）", expanded=True):
+            if st.session_state.get("preview_html"):
+                st.markdown(
+                    f"""
+                    <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; border: 1px solid #ddd; font-size: 16px; line-height: 1.6;">
+                        {st.session_state.preview_html}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
                 )
+                st.caption("💡 紅色高亮部分 = 已自動修正的錯別字／用字")
             else:
                 st.info("尚未產生預覽文字")
 
