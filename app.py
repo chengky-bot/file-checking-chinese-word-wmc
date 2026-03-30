@@ -1,18 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-教材/單元報告審核工具（完整 UI 優化版）
+教材/單元報告審核工具（完整 UI 優化版 + 句尾標點 Checkbox）
 請先安裝相依套件：
     pip install streamlit python-docx
 
 執行方式：
     streamlit run app.py   （或 python -m streamlit run app.py）
-
-主要功能：
-- 自動修正所有你設定的錯別字、用字、標點、排位
-- 紅色標記 + 專名號底線 + WORD JOINER 排位優化
-- 字級位置詳細報告（第 X 段、第 X～Y 字）
-- 純文字修正報告（.txt）一鍵下載
-- 全新 Tabs + 兩欄結果 + Spinner + 重置按鈕
 """
 
 import io
@@ -543,7 +536,8 @@ def process_paragraph_plain_text(
     proper_names: List[str],
     indivisible: List[str],
     stats: defaultdict,
-    is_paragraph_for_period: bool,
+    add_period: bool,          # ← 新增：是否自動補句尾標點
+    is_paragraph_for_period: bool = True,
 ) -> Tuple[str, Set[int], Set[int], List[Dict]]:
     """回傳 (new_text, red_set, under_set, findings)"""
     t = raw
@@ -565,8 +559,8 @@ def process_paragraph_plain_text(
 
     red = _merge_red(r1, r2, r3, r4, r5, r6, r7)
 
-    # 句尾標點
-    if is_paragraph_for_period and _should_add_period_at_end(t):
+    # 句尾標點（新增 checkbox 控制）
+    if add_period and is_paragraph_for_period and _should_add_period_at_end(t):
         t = t.rstrip() + "。"
         pos = len(t) - 1
         red.append((pos, pos + 1))
@@ -599,6 +593,7 @@ def process_document(
     custom_rules: Dict[str, str],
     proper_names: List[str],
     indivisible: List[str],
+    add_period: bool,          # ← 新增：傳遞 checkbox 狀態
 ) -> Tuple[defaultdict, List[Dict]]:
     stats: defaultdict = defaultdict(int)
     all_findings: List[Dict] = []
@@ -610,7 +605,7 @@ def process_document(
         text_ph, drs = _paragraph_text_and_drawings(p)
 
         new_text, red, under, para_findings = process_paragraph_plain_text(
-            text_ph, custom_rules, proper_names, indivisible, stats, True
+            text_ph, custom_rules, proper_names, indivisible, stats, add_period
         )
 
         for f in para_findings:
@@ -631,7 +626,7 @@ def _total_changes(stats: defaultdict) -> int:
     return int(sum(stats.values()))
 
 # ---------------------------------------------------------------------------
-# 主程式
+# 主程式（已加入 Checkbox）
 # ---------------------------------------------------------------------------
 def main() -> None:
     st.set_page_config(page_title="教材/單元報告審核工具", layout="wide")
@@ -649,7 +644,7 @@ def main() -> None:
     if "download_filename" not in st.session_state:
         st.session_state.download_filename = "document_fixed.docx"
 
-    # 側邊欄改成 Tabs
+    # 側邊欄
     col_main, col_side = st.columns([3, 1])
     with col_side:
         st.subheader("⚙️ 規則與清單")
@@ -657,22 +652,30 @@ def main() -> None:
         with tab1:
             custom_rules_text = st.text_area(
                 "自訂額外規則（每行：舊詞:新詞）",
-                height=220,
+                height=180,
                 placeholder="遺規:違規\n暴燥:暴躁",
             )
         with tab2:
             proper_text = st.text_area(
                 "自訂專有名詞清單（每行一個）",
-                height=220,
+                height=180,
                 placeholder="香港大學\n教學樓\n李老師",
             )
         with tab3:
             indiv_text = st.text_area(
                 "不可分割詞彙清單（每行一個）",
                 value=DEFAULT_INDIVISIBLE,
-                height=220,
+                height=180,
                 placeholder="廣場\n落淚\n靈魂",
             )
+
+        # ← 新增：句尾標點 Checkbox（預設不勾選）
+        st.divider()
+        add_period = st.checkbox(
+            "自動補句尾標點",
+            value=False,
+            help="有些文件（如表格、短句、詩詞）不想自動補句號，請取消勾選"
+        )
 
     with col_main:
         up = st.file_uploader("📤 上傳 Word 檔（僅 .docx）", type=["docx"])
@@ -690,7 +693,7 @@ def main() -> None:
             indiv = _parse_lines(indiv_text)
 
             doc = Document(io.BytesIO(data))
-            stats, findings = process_document(doc, custom, names, indiv)
+            stats, findings = process_document(doc, custom, names, indiv, add_period)
 
             # 儲存處理後的 DOCX
             buf = io.BytesIO()
@@ -707,6 +710,7 @@ def main() -> None:
                 f"修正報告 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
                 f"檔案：{up.name}",
                 f"總修正項目：{_total_changes(defaultdict(int, stats))} 項",
+                f"自動補句尾標點：{'已開啟' if add_period else '已關閉'}",
                 "=" * 60,
                 "",
             ]
