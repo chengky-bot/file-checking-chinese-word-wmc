@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-教材/單元報告審核工具（完整 UI 優化版 + 句尾標點 Checkbox）
+教材/單元報告審核工具（完整 UI 優化版 + 貼上文字功能）
 請先安裝相依套件：
     pip install streamlit python-docx
 
@@ -22,7 +22,7 @@ from docx.shared import RGBColor
 from datetime import datetime
 
 # ---------------------------------------------------------------------------
-# 內建規則（可隨時擴充）
+# 內建規則
 # ---------------------------------------------------------------------------
 BUILTIN_REPLACEMENTS: Dict[str, str] = {
     "遺規": "違規",
@@ -53,7 +53,7 @@ DEFAULT_INDIVISIBLE = "廣場\n落淚\n靈魂"
 IMAGE_PLACEHOLDER = "\ufdd0"
 
 # ---------------------------------------------------------------------------
-# 輔助函數（保持不變）
+# 輔助函數（與之前完全相同）
 # ---------------------------------------------------------------------------
 def _parse_custom_rules(text: str) -> Dict[str, str]:
     out: Dict[str, str] = {}
@@ -536,20 +536,13 @@ def process_paragraph_plain_text(
     proper_names: List[str],
     indivisible: List[str],
     stats: defaultdict,
-    add_period: bool,          # ← 新增：是否自動補句尾標點
-    is_paragraph_for_period: bool = True,
+    add_period: bool,
 ) -> Tuple[str, Set[int], Set[int], List[Dict]]:
-    """回傳 (new_text, red_set, under_set, findings)"""
     t = raw
     findings: List[Dict] = []
 
-    # 1) 內建字典
     t, r1 = _apply_sorted_replacements(t, BUILTIN_REPLACEMENTS, stats, "內建")
-
-    # 2) 自訂規則
     t, r2 = _apply_sorted_replacements(t, custom_rules, stats, "自訂")
-
-    # 3) 其他規則
     t, r3 = _apply_single_char_replace(t, "佈", "布", stats, "佈→布")
     t, r4 = _apply_zhuo_to_zhe(t, stats)
     t, r5 = _apply_jilu_jilu(t, stats)
@@ -559,8 +552,7 @@ def process_paragraph_plain_text(
 
     red = _merge_red(r1, r2, r3, r4, r5, r6, r7)
 
-    # 句尾標點（新增 checkbox 控制）
-    if add_period and is_paragraph_for_period and _should_add_period_at_end(t):
+    if add_period and _should_add_period_at_end(t):
         t = t.rstrip() + "。"
         pos = len(t) - 1
         red.append((pos, pos + 1))
@@ -573,13 +565,11 @@ def process_paragraph_plain_text(
             "end": pos + 1,
         })
 
-    # 不可分割詞
     t = _normalize_indivisible_splits(t, indivisible, stats)
     t_before_join = t
     t, r_join = _apply_word_joiners(t, indivisible, stats)
     red = _merge_red(red, r_join)
 
-    # 專名號
     t, underline_before = _apply_proper_nouns(t, proper_names, stats)
     underline_after = _map_underline_after_joiners(t_before_join, t, underline_before)
 
@@ -593,7 +583,7 @@ def process_document(
     custom_rules: Dict[str, str],
     proper_names: List[str],
     indivisible: List[str],
-    add_period: bool,          # ← 新增：傳遞 checkbox 狀態
+    add_period: bool,
 ) -> Tuple[defaultdict, List[Dict]]:
     stats: defaultdict = defaultdict(int)
     all_findings: List[Dict] = []
@@ -626,7 +616,7 @@ def _total_changes(stats: defaultdict) -> int:
     return int(sum(stats.values()))
 
 # ---------------------------------------------------------------------------
-# 主程式（已加入 Checkbox）
+# 主程式（新增「直接貼上文字」功能）
 # ---------------------------------------------------------------------------
 def main() -> None:
     st.set_page_config(page_title="教材/單元報告審核工具", layout="wide")
@@ -643,9 +633,11 @@ def main() -> None:
         st.session_state.report_text = None
     if "download_filename" not in st.session_state:
         st.session_state.download_filename = "document_fixed.docx"
+    if "input_mode" not in st.session_state:
+        st.session_state.input_mode = "上傳 DOCX"
 
-    # 側邊欄
     col_main, col_side = st.columns([3, 1])
+
     with col_side:
         st.subheader("⚙️ 規則與清單")
         tab1, tab2, tab3 = st.tabs(["📝 自訂規則", "🏷️ 專有名詞", "🔗 不可分割詞"])
@@ -669,30 +661,57 @@ def main() -> None:
                 placeholder="廣場\n落淚\n靈魂",
             )
 
-        # ← 新增：句尾標點 Checkbox（預設不勾選）
         st.divider()
         add_period = st.checkbox(
             "自動補句尾標點",
             value=False,
-            help="有些文件（如表格、短句、詩詞）不想自動補句號，請取消勾選"
+            help="有些文件（如表格、短句）不想自動補句號，請取消勾選",
         )
 
+    # ── 新增：輸入方式選擇 ──
     with col_main:
-        up = st.file_uploader("📤 上傳 Word 檔（僅 .docx）", type=["docx"])
+        input_mode = st.radio(
+            "選擇輸入方式",
+            options=["📤 上傳 DOCX", "📋 直接貼上文字"],
+            horizontal=True,
+            key="input_mode_radio",
+        )
 
-        if up is not None:
-            st.info(f"✅ 已上傳：**{up.name}** （{up.size/1024:.1f} KB）")
+        if input_mode == "📤 上傳 DOCX":
+            up = st.file_uploader("上傳 Word 檔（僅 .docx）", type=["docx"])
+            pasted_text = None
+        else:
+            pasted_text = st.text_area(
+                "請在此貼上要檢查的文字",
+                height=250,
+                placeholder="直接貼上文字後，按下方「開始審核」按鈕即可",
+            )
+            up = None
 
         run_btn = st.button("🚀 開始審核並套用修正", type="primary", use_container_width=True)
 
-    if up is not None and run_btn:
-        with st.spinner("🔍 正在審核文件，請稍等..."):
-            data = up.getvalue()
+    # 處理邏輯
+    if run_btn:
+        with st.spinner("🔍 正在審核，請稍等..."):
             custom = _parse_custom_rules(custom_rules_text)
             names = _parse_lines(proper_text)
             indiv = _parse_lines(indiv_text)
 
-            doc = Document(io.BytesIO(data))
+            if input_mode == "📤 上傳 DOCX" and up is not None:
+                data = up.getvalue()
+                doc = Document(io.BytesIO(data))
+                input_name = up.name
+            elif input_mode == "📋 直接貼上文字" and pasted_text:
+                # 把貼上的文字轉成一個簡單的 DOCX
+                doc = Document()
+                for line in pasted_text.split("\n"):
+                    if line.strip():
+                        doc.add_paragraph(line.strip())
+                input_name = "貼上文字.docx"
+            else:
+                st.warning("請上傳檔案或貼上文字")
+                st.stop()
+
             stats, findings = process_document(doc, custom, names, indiv, add_period)
 
             # 儲存處理後的 DOCX
@@ -702,13 +721,14 @@ def main() -> None:
             st.session_state.processed_bytes = buf.getvalue()
             st.session_state.last_stats = dict(stats)
             st.session_state.last_findings = findings
-            base, _ = os.path.splitext(up.name)
+            base = os.path.splitext(input_name)[0]
             st.session_state.download_filename = f"{base}_fixed.docx"
 
             # 產生純文字報告
             report_lines = [
                 f"修正報告 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                f"檔案：{up.name}",
+                f"輸入方式：{input_mode}",
+                f"檔案／文字：{input_name}",
                 f"總修正項目：{_total_changes(defaultdict(int, stats))} 項",
                 f"自動補句尾標點：{'已開啟' if add_period else '已關閉'}",
                 "=" * 60,
@@ -723,7 +743,7 @@ def main() -> None:
                 report_lines.append("-" * 50)
             st.session_state.report_text = "\n".join(report_lines)
 
-    # 結果顯示區
+    # 結果顯示
     if st.session_state.processed_bytes is not None:
         st.success(f"✅ 審核完成！總共修正 **{_total_changes(defaultdict(int, st.session_state.last_stats))}** 項")
 
@@ -760,7 +780,6 @@ def main() -> None:
 
         st.divider()
 
-        # 下載按鈕
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:
             st.download_button(
@@ -780,8 +799,8 @@ def main() -> None:
                     use_container_width=True,
                 )
 
-    # 重置按鈕
-    if st.button("🔄 重置所有設定（清空規則與清單）", use_container_width=True):
+    # 重置
+    if st.button("🔄 重置所有設定", use_container_width=True):
         st.session_state.clear()
         st.rerun()
 
