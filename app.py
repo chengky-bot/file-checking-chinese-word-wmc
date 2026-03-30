@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-教材/單元報告審核工具（完整最終版 + 已修正文字預覽紅色高亮）
-已修正的錯別字會在預覽區用紅色底色高亮顯示
-支援：DOCX、PDF、直接貼上文字
+教材/單元報告審核工具（最終版）
+由程sir設計
+支援 DOCX、PDF、直接貼上文字
+修正統計顯示詳細位置
+已修正文字預覽紅色高亮
 """
 
 import io
@@ -618,7 +620,10 @@ def _total_changes(stats: defaultdict) -> int:
 # ---------------------------------------------------------------------------
 def main() -> None:
     st.set_page_config(page_title="教材/單元報告審核工具", layout="wide")
+    
+    # 標題 + 設計者資訊
     st.title("📚 教材／單元報告審核工具")
+    st.markdown("**程sir設計**")   # ← 設計者標示
 
     # Session State
     if "processed_bytes" not in st.session_state:
@@ -629,7 +634,7 @@ def main() -> None:
         st.session_state.last_findings = []
     if "report_text" not in st.session_state:
         st.session_state.report_text = None
-    if "preview_html" not in st.session_state:      # ← 新增：HTML預覽
+    if "preview_html" not in st.session_state:
         st.session_state.preview_html = None
     if "download_filename" not in st.session_state:
         st.session_state.download_filename = "document_fixed.docx"
@@ -730,7 +735,7 @@ def main() -> None:
             base = os.path.splitext(input_name)[0]
             st.session_state.download_filename = f"{base}_fixed.docx"
 
-            # ── 新增：產生紅色高亮預覽 ──
+            # 產生已修正文字預覽（紅色高亮）
             preview_html = ""
             for para in doc.paragraphs:
                 if para.text.strip():
@@ -805,18 +810,18 @@ def main() -> None:
                 else:
                     st.info("本次沒有發現需要修正的問題")
 
-        # ── 已修正文字預覽（紅色高亮版） ──
+        # 已修正文字預覽（紅色高亮）
         with st.expander("📖 已修正文字預覽（完整內容）", expanded=True):
             if st.session_state.get("preview_html"):
                 st.markdown(
                     f"""
-                    <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; border: 1px solid #ddd; font-size: 16px; line-height: 1.6;">
+                    <div style="background-color: #f9f9f9; padding: 20px; border-radius: 8px; border: 1px solid #ddd; font-size: 16px; line-height: 1.7;">
                         {st.session_state.preview_html}
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
-                st.caption("💡 紅色高亮部分 = 已自動修正的錯別字／用字")
+                st.caption("💡 紅色高亮 = 已自動修正的錯別字／用字")
             else:
                 st.info("尚未產生預覽文字")
 
