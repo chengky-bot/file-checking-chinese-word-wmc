@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-教材/單元報告審核工具（完整 UI 優化版 + 貼上文字功能）
+教材/單元報告審核工具（完整 UI 優化版 + PDF 支援 + 修正統計詳細位置）
 請先安裝相依套件：
-    pip install streamlit python-docx
+    pip install streamlit python-docx pymupdf
 
 執行方式：
-    streamlit run app.py   （或 python -m streamlit run app.py）
+    streamlit run app.py
 """
 
 import io
@@ -20,6 +20,7 @@ from docx.enum.text import WD_UNDERLINE
 from docx.oxml.ns import qn
 from docx.shared import RGBColor
 from datetime import datetime
+import fitz  # pymupdf
 
 # ---------------------------------------------------------------------------
 # 內建規則
@@ -53,7 +54,7 @@ DEFAULT_INDIVISIBLE = "廣場\n落淚\n靈魂"
 IMAGE_PLACEHOLDER = "\ufdd0"
 
 # ---------------------------------------------------------------------------
-# 輔助函數（與之前完全相同）
+# 輔助函數（與之前相同）
 # ---------------------------------------------------------------------------
 def _parse_custom_rules(text: str) -> Dict[str, str]:
     out: Dict[str, str] = {}
@@ -616,7 +617,7 @@ def _total_changes(stats: defaultdict) -> int:
     return int(sum(stats.values()))
 
 # ---------------------------------------------------------------------------
-# 主程式（新增「直接貼上文字」功能）
+# 主程式（已支援 PDF + 修正統計詳細位置）
 # ---------------------------------------------------------------------------
 def main() -> None:
     st.set_page_config(page_title="教材/單元報告審核工具", layout="wide")
@@ -633,8 +634,6 @@ def main() -> None:
         st.session_state.report_text = None
     if "download_filename" not in st.session_state:
         st.session_state.download_filename = "document_fixed.docx"
-    if "input_mode" not in st.session_state:
-        st.session_state.input_mode = "上傳 DOCX"
 
     col_main, col_side = st.columns([3, 1])
 
@@ -668,53 +667,61 @@ def main() -> None:
             help="有些文件（如表格、短句）不想自動補句號，請取消勾選",
         )
 
-    # ── 新增：輸入方式選擇 ──
     with col_main:
         input_mode = st.radio(
             "選擇輸入方式",
-            options=["📤 上傳 DOCX", "📋 直接貼上文字"],
+            options=["📤 上傳檔案（DOCX / PDF）", "📋 直接貼上文字"],
             horizontal=True,
-            key="input_mode_radio",
         )
 
-        if input_mode == "📤 上傳 DOCX":
-            up = st.file_uploader("上傳 Word 檔（僅 .docx）", type=["docx"])
+        if input_mode == "📤 上傳檔案（DOCX / PDF）":
+            up = st.file_uploader("上傳檔案", type=["docx", "pdf"])
             pasted_text = None
         else:
             pasted_text = st.text_area(
                 "請在此貼上要檢查的文字",
                 height=250,
-                placeholder="直接貼上文字後，按下方「開始審核」按鈕即可",
+                placeholder="直接貼上文字後，按下方按鈕",
             )
             up = None
 
         run_btn = st.button("🚀 開始審核並套用修正", type="primary", use_container_width=True)
 
-    # 處理邏輯
     if run_btn:
         with st.spinner("🔍 正在審核，請稍等..."):
             custom = _parse_custom_rules(custom_rules_text)
             names = _parse_lines(proper_text)
             indiv = _parse_lines(indiv_text)
 
-            if input_mode == "📤 上傳 DOCX" and up is not None:
-                data = up.getvalue()
-                doc = Document(io.BytesIO(data))
-                input_name = up.name
+            if input_mode == "📤 上傳檔案（DOCX / PDF）" and up is not None:
+                file_bytes = up.getvalue()
+                file_name = up.name.lower()
+
+                if file_name.endswith(".pdf"):
+                    pdf_doc = fitz.open(stream=file_bytes, filetype="pdf")
+                    full_text = "\n\n".join(page.get_text("text") for page in pdf_doc)
+                    doc = Document()
+                    for line in full_text.split("\n"):
+                        if line.strip():
+                            doc.add_paragraph(line.strip())
+                    input_name = up.name
+                else:
+                    doc = Document(io.BytesIO(file_bytes))
+                    input_name = up.name
+
             elif input_mode == "📋 直接貼上文字" and pasted_text:
-                # 把貼上的文字轉成一個簡單的 DOCX
                 doc = Document()
                 for line in pasted_text.split("\n"):
                     if line.strip():
                         doc.add_paragraph(line.strip())
                 input_name = "貼上文字.docx"
+
             else:
                 st.warning("請上傳檔案或貼上文字")
                 st.stop()
 
             stats, findings = process_document(doc, custom, names, indiv, add_period)
 
-            # 儲存處理後的 DOCX
             buf = io.BytesIO()
             doc.save(buf)
             buf.seek(0)
@@ -724,7 +731,7 @@ def main() -> None:
             base = os.path.splitext(input_name)[0]
             st.session_state.download_filename = f"{base}_fixed.docx"
 
-            # 產生純文字報告
+            # 產生報告
             report_lines = [
                 f"修正報告 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
                 f"輸入方式：{input_mode}",
@@ -743,7 +750,6 @@ def main() -> None:
                 report_lines.append("-" * 50)
             st.session_state.report_text = "\n".join(report_lines)
 
-    # 結果顯示
     if st.session_state.processed_bytes is not None:
         st.success(f"✅ 審核完成！總共修正 **{_total_changes(defaultdict(int, st.session_state.last_stats))}** 項")
 
@@ -752,18 +758,44 @@ def main() -> None:
         with col1:
             with st.expander("📊 修正統計", expanded=True):
                 stats = st.session_state.last_stats or {}
+                findings = st.session_state.get("last_findings", [])
+
+                # 內建規則
                 builtin_lines = [f"- {k}: {v}" for k, v in sorted(stats.items()) if k.startswith("內建:")]
-                custom_lines = [f"- {k}: {v}" for k, v in sorted(stats.items()) if k.startswith("自訂:")]
-                other_keys = [k for k in sorted(stats.keys()) if not k.startswith(("內建:", "自訂:"))]
                 if builtin_lines:
                     st.markdown("**內建規則**")
                     st.markdown("\n".join(builtin_lines))
+
+                # 自訂規則
+                custom_lines = [f"- {k}: {v}" for k, v in sorted(stats.items()) if k.startswith("自訂:")]
                 if custom_lines:
                     st.markdown("**自訂規則**")
                     st.markdown("\n".join(custom_lines))
+
+                # 其他規則（現在加上詳細位置）
                 st.markdown("**其他**")
+                # 按規則分組，顯示位置
+                from collections import defaultdict as dd
+                rule_locations = dd(list)
+                for f in findings:
+                    rule = f.get("rule", "未知規則")
+                    loc = f.get("location", "未知段落")
+                    rule_locations[rule].append(loc)
+
+                for rule, locs in sorted(rule_locations.items()):
+                    count = len(locs)
+                    st.markdown(f"• **{rule}**：{count} 次")
+                    # 顯示位置（避免太長，只顯示前 5 個）
+                    unique_locs = list(dict.fromkeys(locs))  # 去重
+                    for loc in unique_locs[:5]:
+                        st.caption(f"　　{loc}")
+                    if len(unique_locs) > 5:
+                        st.caption(f"　　... 還有 {len(unique_locs)-5} 段")
+
+                # 原本的其他統計（保持相容）
+                other_keys = [k for k in sorted(stats.keys()) if not k.startswith(("內建:", "自訂:")) and k not in rule_locations]
                 for k in other_keys:
-                    st.markdown(f"- {k}: {stats[k]}")
+                    st.markdown(f"• {k}: {stats[k]}")
 
         with col2:
             with st.expander("📍 字級問題位置", expanded=True):
@@ -799,7 +831,6 @@ def main() -> None:
                     use_container_width=True,
                 )
 
-    # 重置
     if st.button("🔄 重置所有設定", use_container_width=True):
         st.session_state.clear()
         st.rerun()
