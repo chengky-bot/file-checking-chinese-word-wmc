@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-教材/單元報告審核工具（完整最終版）
+教材/單元報告審核工具（完整最終版 + 優化修正統計顯示格式）
 支援：DOCX、PDF、直接貼上文字
-修正統計會顯示每個規則出現在哪幾段
+修正統計已大幅優化：每個規則都會清楚顯示「次數 + 具體段落位置」
 """
 
 import io
@@ -51,7 +51,7 @@ DEFAULT_INDIVISIBLE = "廣場\n落淚\n靈魂"
 IMAGE_PLACEHOLDER = "\ufdd0"
 
 # ---------------------------------------------------------------------------
-# 輔助函數
+# 輔助函數（與之前完全相同）
 # ---------------------------------------------------------------------------
 def _parse_custom_rules(text: str) -> Dict[str, str]:
     out: Dict[str, str] = {}
@@ -769,8 +769,8 @@ def main() -> None:
                     st.markdown("**自訂規則**")
                     st.markdown("\n".join(custom_lines))
 
-                # 其他規則（重點：顯示詳細段落位置）
-                st.markdown("**其他**")
+                # 其他規則（已優化顯示格式）
+                st.markdown("**其他規則**")
                 rule_locations = defaultdict(list)
                 for f in findings:
                     rule = f.get("rule", "未知規則")
@@ -780,11 +780,17 @@ def main() -> None:
                 for rule, locs in sorted(rule_locations.items()):
                     count = len(locs)
                     unique_locs = list(dict.fromkeys(locs))  # 去重
-                    st.markdown(f"• **{rule}**：{count} 次")
-                    for loc in unique_locs[:8]:   # 顯示最多 8 個段落
-                        st.caption(f"　　{loc}")
+                    st.markdown(f"**• {rule}**　`{count} 次`")
+                    # 優化位置顯示：一行顯示多個段落
+                    loc_str = "、".join(unique_locs[:8])
+                    st.caption(f"出現於：{loc_str}")
                     if len(unique_locs) > 8:
-                        st.caption(f"　　... 還有 {len(unique_locs)-8} 段")
+                        st.caption(f"... 還有 {len(unique_locs)-8} 段")
+
+                # 其他未分類統計
+                other_keys = [k for k in sorted(stats.keys()) if not k.startswith(("內建:", "自訂:")) and k not in rule_locations]
+                for k in other_keys:
+                    st.markdown(f"• {k}: {stats[k]}")
 
         with col2:
             with st.expander("📍 字級問題位置", expanded=True):
