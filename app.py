@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-教材/單元報告審核工具（最終版 + 預覽區真正紅色高亮）
+教材/單元報告審核工具（ver 2.5）
 由程sir設計
-預覽區現在會正確顯示紅色高亮
+每次更新都會明顯標示版本，方便你識別最新版
 """
 
 import io
@@ -20,7 +20,7 @@ from datetime import datetime
 import fitz  # pymupdf
 
 # ---------------------------------------------------------------------------
-# 內建規則
+# 內建規則（ver 2.5 已加入「溫→温」）
 # ---------------------------------------------------------------------------
 BUILTIN_REPLACEMENTS: Dict[str, str] = {
     "遺規": "違規",
@@ -34,6 +34,7 @@ BUILTIN_REPLACEMENTS: Dict[str, str] = {
     "座標": "坐標",
     "裡": "裏",
     "溫度": "温度",
+    "溫": "温",          # ← ver 2.5 新增，解決「溫習」等詞問題
     "部份": "部分",
     "盡量": "儘量",
     "掃瞄二維碼": "掃描二維碼",
@@ -51,7 +52,7 @@ DEFAULT_INDIVISIBLE = "廣場\n落淚\n靈魂"
 IMAGE_PLACEHOLDER = "\ufdd0"
 
 # ---------------------------------------------------------------------------
-# 輔助函數（與之前完全相同）
+# 輔助函數（與 ver 2.4 完全相同）
 # ---------------------------------------------------------------------------
 def _parse_custom_rules(text: str) -> Dict[str, str]:
     out: Dict[str, str] = {}
@@ -613,9 +614,6 @@ def process_document(
 def _total_changes(stats: defaultdict) -> int:
     return int(sum(stats.values()))
 
-# ---------------------------------------------------------------------------
-# 新增：從 DOCX 讀取已套用顏色的文字，產生紅色高亮 HTML
-# ---------------------------------------------------------------------------
 def build_preview_html(doc: Document) -> str:
     html = ""
     for para in doc.paragraphs:
@@ -634,12 +632,12 @@ def build_preview_html(doc: Document) -> str:
     return html
 
 # ---------------------------------------------------------------------------
-# 主程式
+# 主程式（ver 2.5）
 # ---------------------------------------------------------------------------
 def main() -> None:
     st.set_page_config(page_title="教材/單元報告審核工具", layout="wide")
     st.title("📚 教材／單元報告審核工具")
-    st.markdown("**由程sir設計**")
+    st.markdown("**由程sir設計**　｜　**ver 2.5**　｜　2026-04-13")
 
     # Session State
     if "processed_bytes" not in st.session_state:
@@ -751,12 +749,10 @@ def main() -> None:
             base = os.path.splitext(input_name)[0]
             st.session_state.download_filename = f"{base}_fixed.docx"
 
-            # 產生真正有紅色高亮的 HTML 預覽
             st.session_state.preview_html = build_preview_html(doc)
 
-            # 產生報告
             report_lines = [
-                f"修正報告 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                f"修正報告 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}　(ver 2.5)",
                 f"輸入方式：{input_mode}",
                 f"檔案／文字：{input_name}",
                 f"總修正項目：{_total_changes(defaultdict(int, stats))} 項",
@@ -774,7 +770,7 @@ def main() -> None:
             st.session_state.report_text = "\n".join(report_lines)
 
     if st.session_state.processed_bytes is not None:
-        st.success(f"✅ 審核完成！總共修正 **{_total_changes(defaultdict(int, st.session_state.last_stats))}** 項")
+        st.success(f"✅ 審核完成！總共修正 **{_total_changes(defaultdict(int, st.session_state.last_stats))}** 項　(ver 2.5)")
 
         col1, col2 = st.columns(2)
 
@@ -822,7 +818,6 @@ def main() -> None:
                 else:
                     st.info("本次沒有發現需要修正的問題")
 
-        # ── 真正有紅色高亮的預覽區 ──
         with st.expander("📖 已修正文字預覽（紅色高亮 + 修正說明）", expanded=True):
             if st.session_state.get("preview_html"):
                 st.markdown(
