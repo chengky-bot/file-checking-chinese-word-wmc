@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-教材/單元報告審核工具（最終優化版）
+教材/單元報告審核工具（最終版 + 預覽區真正紅色高亮）
 由程sir設計
-預覽區高亮顏色已大幅優化（深紅文字 + 淺黃底色 + 加粗）
+預覽區現在會正確顯示紅色高亮
 """
 
 import io
@@ -614,6 +614,26 @@ def _total_changes(stats: defaultdict) -> int:
     return int(sum(stats.values()))
 
 # ---------------------------------------------------------------------------
+# 新增：從 DOCX 讀取已套用顏色的文字，產生紅色高亮 HTML
+# ---------------------------------------------------------------------------
+def build_preview_html(doc: Document) -> str:
+    html = ""
+    for para in doc.paragraphs:
+        if not para.text.strip():
+            continue
+        para_html = ""
+        for run in para.runs:
+            text = run.text
+            if not text:
+                continue
+            style = ""
+            if run.font.color.rgb and run.font.color.rgb == RGBColor(255, 0, 0):
+                style = 'style="color:#d32f2f; background-color:#fff3cd; font-weight:bold; padding:2px 4px; border-radius:3px;"'
+            para_html += f'<span {style}>{text}</span>'
+        html += f"<p>{para_html}</p>"
+    return html
+
+# ---------------------------------------------------------------------------
 # 主程式
 # ---------------------------------------------------------------------------
 def main() -> None:
@@ -731,12 +751,8 @@ def main() -> None:
             base = os.path.splitext(input_name)[0]
             st.session_state.download_filename = f"{base}_fixed.docx"
 
-            # 產生紅色高亮預覽（已優化對比）
-            preview_html = ""
-            for para in doc.paragraphs:
-                if para.text.strip():
-                    preview_html += f"<p>{para.text}</p>"
-            st.session_state.preview_html = preview_html
+            # 產生真正有紅色高亮的 HTML 預覽
+            st.session_state.preview_html = build_preview_html(doc)
 
             # 產生報告
             report_lines = [
@@ -806,7 +822,7 @@ def main() -> None:
                 else:
                     st.info("本次沒有發現需要修正的問題")
 
-        # ── 優化後的已修正文字預覽 ──
+        # ── 真正有紅色高亮的預覽區 ──
         with st.expander("📖 已修正文字預覽（紅色高亮 + 修正說明）", expanded=True):
             if st.session_state.get("preview_html"):
                 st.markdown(
@@ -817,7 +833,7 @@ def main() -> None:
                     """,
                     unsafe_allow_html=True,
                 )
-                st.caption("💡 **紅色 + 淺黃底色 + 加粗** = 已自動修正的錯別字／用字")
+                st.caption("💡 紅色高亮 = 已自動修正的錯別字／用字")
             else:
                 st.info("尚未產生預覽文字")
 
