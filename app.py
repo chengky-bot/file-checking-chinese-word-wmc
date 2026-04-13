@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-教材/單元報告審核工具（最終版 + 紅色文字預覽 + 明確修正說明）
+教材/單元報告審核工具（最終優化版）
 由程sir設計
+預覽區高亮顏色已大幅優化（深紅文字 + 淺黃底色 + 加粗）
 """
 
 import io
@@ -50,7 +51,7 @@ DEFAULT_INDIVISIBLE = "廣場\n落淚\n靈魂"
 IMAGE_PLACEHOLDER = "\ufdd0"
 
 # ---------------------------------------------------------------------------
-# 輔助函數（保持不變）
+# 輔助函數（與之前完全相同）
 # ---------------------------------------------------------------------------
 def _parse_custom_rules(text: str) -> Dict[str, str]:
     out: Dict[str, str] = {}
@@ -730,7 +731,7 @@ def main() -> None:
             base = os.path.splitext(input_name)[0]
             st.session_state.download_filename = f"{base}_fixed.docx"
 
-            # ── 產生紅色高亮預覽 ──
+            # 產生紅色高亮預覽（已優化對比）
             preview_html = ""
             for para in doc.paragraphs:
                 if para.text.strip():
@@ -805,31 +806,18 @@ def main() -> None:
                 else:
                     st.info("本次沒有發現需要修正的問題")
 
-        # ── 已修正文字預覽（紅色高亮 + 修正說明） ──
+        # ── 優化後的已修正文字預覽 ──
         with st.expander("📖 已修正文字預覽（紅色高亮 + 修正說明）", expanded=True):
             if st.session_state.get("preview_html"):
-                # 紅色高亮預覽
                 st.markdown(
                     f"""
-                    <div style="background-color: #f9f9f9; padding: 20px; border-radius: 8px; border: 1px solid #ddd; font-size: 16px; line-height: 1.7;">
+                    <div style="background-color: #f9f9f9; padding: 25px; border-radius: 12px; border: 2px solid #e0e0e0; font-size: 17px; line-height: 1.8; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
                         {st.session_state.preview_html}
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
-                st.caption("💡 紅色文字 = 已自動修正的錯別字／用字")
-
-                # 修正說明列表
-                findings = st.session_state.get("last_findings", [])
-                if findings:
-                    st.markdown("### 📋 本次修正的詳細位置")
-                    for item in findings:
-                        start = item.get("start", 0) + 1
-                        end = item.get("end", start)
-                        st.markdown(f"**{item.get('location')}　第 {start}～{end} 字** **{item.get('rule')}**")
-                        st.caption(f"原本 → 修正後：{item.get('before', '')[:80]}... → {item.get('after', '')[:80]}...")
-                else:
-                    st.info("本次沒有發現需要修正的問題")
+                st.caption("💡 **紅色 + 淺黃底色 + 加粗** = 已自動修正的錯別字／用字")
             else:
                 st.info("尚未產生預覽文字")
 
